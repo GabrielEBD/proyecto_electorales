@@ -8,7 +8,7 @@ class Author(models.Model):
     user_id = models.CharField(max_length=50, null=True, blank=True)
 
 class Tweet(models.Model):
-    author = models.ForeignKey(Author)
+    author = models.ForeignKey(Author,on_delete=models.SET_NULL,null=True, blank=True)
     id_tweet = models.CharField(max_length=100, null=True, blank=True)
     full_text = models.TextField(null=True, blank=True)
     created_at = models.CharField(max_length=100, null=True, blank=True)
