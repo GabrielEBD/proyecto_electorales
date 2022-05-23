@@ -4,7 +4,7 @@ import datetime
 import time
 import pandas as pd
 import pymongo
-from datos.views import * 
+from datos.models import * 
 
 #clase para el control de la info con mongoDB
 class MongoFullDataObject():
@@ -90,12 +90,21 @@ def recolectar_datos():
     stream.add_rules(reglas)
     stream.filter()
 
-#Recolreccion de la info por tweet (informacion especifica) guadato a Postgres db y mongodb
-def get_info_tweet_by_id():
-    #conexion con mongoDB local (MongoDB Compass Windows 10)
+def test_conexion_mongo():
     client = pymongo.MongoClient("localhost:27017")
     db = client.proyecto_tweets
     tweets = db.tweets
+    new_tweets = [
+        {"id":1,"text":"hola"},
+        {"id": 2, "text": "hola"},
+        {"id": 3, "text": "hola"},
+    ]
+    one  = {"id": 3, "text": "hola"}
+    tweets.insert_one(one)
+
+#Recolreccion de la info por tweet (informacion especifica) guadato a Postgres db y mongodb
+def get_info_tweet_by_id()  :
+
 
     archivos = [
         'data_19_04_2022.csv',
@@ -121,102 +130,112 @@ def get_info_tweet_by_id():
     revisados = list(set(Revisados.objects.all().values_list('id_revisado',flat=True)))
     nuevos_revisados = []
     for archivo in archivos:
-        tweets = pd.read_csv(ruta+archivo)
-        for fila in range(int(tweets.size/10)):
-            if not str(tweets['id'][fila]) in revisados:
+        tweets_df = pd.read_csv(ruta+archivo)
+        for fila in range(int(tweets_df.size/10)):
+            if not str(tweets_df['id'][fila]) in revisados:
                 
-                time.sleep(1)
-                nuevos_revisados.append(str(tweets['id'][fila]))
-
+                time.sleep(3)
+                nuevos_revisados.append(str(tweets_df['id'][fila]))
                 try:
                     tweet = cliente.get_tweet(
-                        id=tweets['id'][fila],
+                        id=tweets_df['id'][fila],
                         tweet_fields=['created_at','geo','lang','public_metrics','author_id'],
                         user_fields=['username','created_at','location','public_metrics'],
                         expansions=['author_id'])
                 except Exception as e:
                     print('-- reinicio de sesion --')
+                    time.sleep(5)
+
                     cliente = tweepy.Client("AAAAAAAAAAAAAAAAAAAAAJLRbQEAAAAAA2AWS3eie2QqJ%2BNS%2Bgvb3ilSB%2B8%3DqbVfospXUBhOouO2nDaL1IhJkSkojlUxMMVRmcGHJoJRBPQIs4")
                     tweet = cliente.get_tweet(
-                        id=tweets['id'][fila],
+                        id=tweets_df['id'][fila],
                         tweet_fields=['created_at','geo','lang','public_metrics','author_id'],
                         user_fields=['username','created_at','location','public_metrics'],
                         expansions=['author_id']
                         )
+                if tweet.data:
+                    dict_tweet_completo = {
+                        'quote_count':tweet.data.data['public_metrics']['quote_count'],
+                        'like_count':tweet.data.data['public_metrics']['like_count'],
+                        'reply_count':tweet.data.data['public_metrics']['reply_count'],
+                        'retweet_count':tweet.data.data['public_metrics']['retweet_count'],
+                        'created_at':tweet.data.data['created_at'],
+                        'name':tweet.includes['users'][0].name,
+                        'username':tweet.includes['users'][0].username,
+                        'user_id':tweet.data.data['author_id'],
+                        'id_tweet':tweet.data.data['id'],
+                        'full_text':tweet.data.data['text'],
+                        'lang':tweet.data.data['lang']
+                    }
+                    lista_tweets_mongodb.append(MongoFullDataObject(**dict_tweet_completo).json_object)
+                    
 
-                dict_tweet_completo = {
-                    'quote_count':tweet.data.data['public_metrics']['quote_count'],
-                    'like_count':tweet.data.data['public_metrics']['like_count'],
-                    'reply_count':tweet.data.data['public_metrics']['reply_count'],
-                    'retweet_count':tweet.data.data['public_metrics']['retweet_count'],
-                    'created_at':tweet.data.data['created_at'],
-                    'name':tweet.includes['users'][0].name,
-                    'username':tweet.includes['users'][0].username,
-                    'user_id':tweet.data.data['author_id'],
-                    'id_tweet':tweet.data.data['id'],
-                    'full_text':tweet.data.data['text'],
-                    'lang':tweet.data.data['lang']
-                }
-                lista_tweets_mongodb.append(MongoFullDataObject(**dict_tweet_completo).json_object)
-                
+                    autor = Author(**{
+                        'user_id':tweet.data.data['author_id'],
+                        'username':tweet.includes['users'][0].username,
+                        'name':tweet.includes['users'][0].name
+                    })
+                    dict_user_model[tweet.data.data['author_id']] = autor
+                    lista_usuarios_sql.append(autor)
 
-                autor = Author(**{
-                    'user_id':tweet.data.data['author_id'],
-                    'username':tweet.includes['users'][0].username,
-                    'name':tweet.includes['users'][0].name
-                })
-                dict_user_id[tweet.data.data['author_id']] = autor
-                lista_usuarios_sql.append(autor)
+                    dict_tweet_id[tweet.data.data['id']]={
+                        'quote_count':tweet.data.data['public_metrics']['quote_count'],
+                        'like_count':tweet.data.data['public_metrics']['like_count'],
+                        'reply_count':tweet.data.data['public_metrics']['reply_count'],
+                        'retweet_count':tweet.data.data['public_metrics']['retweet_count'],
+                        'created_at':tweet.data.data['created_at'],
+                        'author':tweet.data.data['author_id'],
+                        'id_tweet':tweet.data.data['id'],
+                        'full_text':tweet.data.data['text'],
+                        'lang':tweet.data.data['lang']
+                    }
+                    
+                    #SISTEMA DE GUARDADO CADA 10.000 TWEETS PARA EVITAR PROBLEMAS DE PERDIDA DE INFORMACION EN CASOS DE ERRORES EN EL PC LOCAL 
+                    if i % 1000 == 0 and i != 0:
+                        #conexion con mongoDB local (MongoDB Compass Windows 10)
+                        client = pymongo.MongoClient("localhost:27017")
+                        db = client.proyecto_tweets
+                        tweets = db.tweets
 
-                dict_tweet_id[tweet.data.data['id']]={
-                    'quote_count':tweet.data.data['public_metrics']['quote_count'],
-                    'like_count':tweet.data.data['public_metrics']['like_count'],
-                    'reply_count':tweet.data.data['public_metrics']['reply_count'],
-                    'retweet_count':tweet.data.data['public_metrics']['retweet_count'],
-                    'created_at':tweet.data.data['created_at'],
-                    'author':tweet.data.data['author_id'],
-                    'id_tweet':tweet.data.data['id'],
-                    'full_text':tweet.data.data['text'],
-                    'lang':tweet.data.data['lang']
-                }
-                
-                #SISTEMA DE GUARDADO CADA 10.000 TWEETS PARA EVITAR PROBLEMAS DE PERDIDA DE INFORMACION EN CASOS DE ERRORES EN EL PC LOCAL 
-                if i% 10000 == 0 and i =! 0:
-                    #GUARDADO DE DATOS EN MONGO
-                    tweets.insert_many(lista_tweets_mongodb)
-                    lista_tweets_mongodb = []
+                        #GUARDADO DE DATOS EN MONGO
+                        tweets.insert_many(lista_tweets_mongodb)
+                        lista_tweets_mongodb = []
 
-                    #GUARDADO DE AUTORES EN POSTGRES
-                    Author.objects.bulk_create(lista_usuarios_sql)
-                    lista_usuarios_sql = []
+                        #GUARDADO DE AUTORES EN POSTGRES
+                        Author.objects.bulk_create(lista_usuarios_sql)
+                        lista_usuarios_sql = []
 
-                    #ASIGNACION DE ForeignKey DE AUTOR A CADA TWEET Y CREACION DE TWEETS 
-                    for id_tweet in dict_tweet_id:
-                        tweet = dict_tweet_id[id_tweet]
-                        tweet['author'] = dict_user_id[tweet_dict['author']]
-                        lista_tweets_sql.append(Tweet(**tweet))
-                    Tweet.objects.bulk_create(lista_tweets_sql)
-                    lista_tweets_sql = []
+                        #ASIGNACION DE ForeignKey DE AUTOR A CADA TWEET Y CREACION DE TWEETS 
+                        for id_tweet in dict_tweet_id:
+                            tweet = dict_tweet_id[id_tweet]
+                            tweet['author'] = dict_user_model[tweet_dict['author']]
+                            lista_tweets_sql.append(Tweet(**tweet))
+                        Tweet.objects.bulk_create(lista_tweets_sql)
+                        lista_tweets_sql = []
 
-                    #ACTUALIZACION DE TWEETS YA REVISADOS EN CASO DE CORTE O PAUSA DEL SCRIPT
-                    lista_revisados_nuevos = []
-                    for id_nuevo in nuevos_revisados:
-                        lista_revisados_nuevos.append(Revisados(**{'id_revisado':id_nuevo}))
-                    Revisados.objects.bulk_create(lista_revisados_nuevos)
-                    nuevos_revisados=[]
-                    revisados = list(set(Revisados.objects.all().values_list('id_revisado',flat=True)))
+                        #ACTUALIZACION DE TWEETS YA REVISADOS EN CASO DE CORTE O PAUSA DEL SCRIPT
+                        lista_revisados_nuevos = []
+                        for id_nuevo in nuevos_revisados:
+                            lista_revisados_nuevos.append(Revisados(**{'id_revisado':id_nuevo}))
+                        Revisados.objects.bulk_create(lista_revisados_nuevos)
+                        nuevos_revisados=[]
+                        revisados = list(set(Revisados.objects.all().values_list('id_revisado',flat=True)))
+                        print(i)
 
-                i+=1
+                    i+=1
 
     #PROCESO DE GUARDADO DE TWEETS FALTANTES
     Author.objects.bulk_create(lista_usuarios_sql)
 
     for id_tweet in dict_tweet_id:
         tweet = dict_tweet_id[id_tweet]
-        tweet['author'] = dict_user_id[tweet_dict['author']]
+        tweet['author'] = dict_user_model[tweet_dict['author']]
         lista_tweets_sql.append(Tweet(**tweet))
     Tweet.objects.bulk_create(lista_tweets_sql)
 
-    
+    #conexion con mongoDB local (MongoDB Compass Windows 10)
+    client = pymongo.MongoClient("localhost:27017")
+    db = client.proyecto_tweets
+    tweets = db.tweets
     tweets.insert_many(lista_tweets_mongodb)
     
